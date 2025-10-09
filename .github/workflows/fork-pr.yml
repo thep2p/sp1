@@ -49,7 +49,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy --all-features --all-targets --exclude test-artifacts -- -D warnings -A incomplete-features
+        run: cargo clippy --workspace --all-features --lib --bins -- -D warnings -A incomplete-features
         env:
           CARGO_INCREMENTAL: 1
 
@@ -59,9 +59,9 @@ jobs:
     strategy:
       matrix:
         feature-flags:
-          - "--workspace --all-targets --no-default-features"
-          - "--workspace --all-targets"
-          - "--workspace --all-targets --all-features"
+          - "--workspace --lib --bins --no-default-features"
+          - "--workspace --lib --bins"
+          - "--workspace --lib --bins --all-features"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -82,7 +82,7 @@ jobs:
           go-version: "1.22"
 
       - name: Run cargo check
-        run: cargo check ${{ matrix.feature-flags }} --exclude test-artifacts
+        run: cargo check ${{ matrix.feature-flags }}
 
   check-verifier-no-std:
     name: Check Verifier no_std
