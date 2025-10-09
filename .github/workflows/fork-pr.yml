@@ -30,7 +30,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools, rustc-dev
 
       - name: Install nightly for formatting
         uses: dtolnay/rust-toolchain@nightly
@@ -49,7 +49,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings -A incomplete-features
+        run: cargo clippy --all-features --all-targets --exclude test-artifacts -- -D warnings -A incomplete-features
         env:
           CARGO_INCREMENTAL: 1
 
@@ -68,6 +68,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -80,7 +82,7 @@ jobs:
           go-version: "1.22"
 
       - name: Run cargo check
-        run: cargo check ${{ matrix.feature-flags }}
+        run: cargo check ${{ matrix.feature-flags }} --exclude test-artifacts
 
   check-verifier-no-std:
     name: Check Verifier no_std
@@ -100,38 +102,16 @@ jobs:
       - name: Check verifier no_std build
         run: cargo check --target riscv32imac-unknown-none-elf --no-default-features -p sp1-verifier
 
-  test-artifacts-check:
-    name: Check test-artifacts
+  # Note: test-artifacts and examples require the SP1 toolchain to be installed
+  # which is too resource-intensive for quick fork CI checks.
+  # These are thoroughly tested in the upstream CI.
+
+  examples-format:
+    name: Examples Format Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
-      - name: Check test-artifacts
-        run: cargo check -p test-artifacts
-        env:
-          CARGO_INCREMENTAL: 1
-
-  examples-check:
-    name: Examples Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Install nightly for formatting
         uses: dtolnay/rust-toolchain@nightly
@@ -141,20 +121,10 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
       - name: Format examples
         run: |
           cd examples
           cargo +nightly fmt --all -- --check
-
-      - name: Check examples
-        run: |
-          cd examples
-          cargo check --all-targets --all-features
 
   # Optional: Light unit tests (excluding resource-intensive integration tests)
   # Uncomment if you want some test coverage, but be aware this may take longer
