@@ -1,0 +1,182 @@
+name: Fork PR CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - thep2p-dev
+    paths:
+      - "crates/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - ".github/workflows/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run cargo fmt
+        run: cargo +nightly fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings -A incomplete-features
+        env:
+          CARGO_INCREMENTAL: 1
+
+  check:
+    name: Cargo Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature-flags:
+          - "--workspace --all-targets --no-default-features"
+          - "--workspace --all-targets"
+          - "--workspace --all-targets --all-features"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.feature-flags }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run cargo check
+        run: cargo check ${{ matrix.feature-flags }}
+
+  check-verifier-no-std:
+    name: Check Verifier no_std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imac-unknown-none-elf
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check verifier no_std build
+        run: cargo check --target riscv32imac-unknown-none-elf --no-default-features -p sp1-verifier
+
+  test-artifacts-check:
+    name: Check test-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Check test-artifacts
+        run: cargo check -p test-artifacts
+        env:
+          CARGO_INCREMENTAL: 1
+
+  examples-check:
+    name: Examples Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Format examples
+        run: |
+          cd examples
+          cargo +nightly fmt --all -- --check
+
+      - name: Check examples
+        run: |
+          cd examples
+          cargo check --all-targets --all-features
+
+  # Optional: Light unit tests (excluding resource-intensive integration tests)
+  # Uncomment if you want some test coverage, but be aware this may take longer
+  # unit-tests:
+  #   name: Unit Tests
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout sources
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Install Rust toolchain
+  #       uses: dtolnay/rust-toolchain@stable
+  #
+  #     - name: Setup Rust cache
+  #       uses: Swatinem/rust-cache@v2
+  #
+  #     - name: Install Go
+  #       uses: actions/setup-go@v5
+  #       with:
+  #         go-version: "1.22"
+  #
+  #     - name: Run unit tests (lib tests only, no integration tests)
+  #       run: cargo test --lib --workspace --exclude sp1-verifier
+  #       env:
+  #         RUST_BACKTRACE: 1
