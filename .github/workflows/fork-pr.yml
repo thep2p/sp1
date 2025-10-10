@@ -1,0 +1,210 @@
+# Streamlined CI for SP1 fork development
+# This workflow runs on default GitHub Actions runners without custom machines
+# It excludes resource-intensive jobs and packages that require the SP1 toolchain
+#
+# Excluded packages:
+# - test-artifacts: Requires SP1 toolchain for build script
+# - sp1-verifier: Requires SP1 toolchain
+# - sp1-build: Requires 'succinct' toolchain
+# - sp1-cli: Depends on sp1-build
+# - sp1-cuda: Depends on test-artifacts
+# - sp1-prover: Depends on test-artifacts
+# - sp1-sdk: Depends on test-artifacts
+# - sp1-core-machine: Depends on test-artifacts
+# - sp1-core-executor: Depends on test-artifacts
+# - sp1-recursion-circuit: Depends on test-artifacts
+# - sp1-eval: Performance evaluation tools
+# - sp1-perf: Performance benchmarks
+#
+# This ensures quick CI feedback for code quality without needing specialized infrastructure
+
+name: Fork PR CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - thep2p-dev
+    paths:
+      - "crates/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - ".github/workflows/**"
+  push:
+    branches:
+      - thep2p/ci  # Add push trigger for testing
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Cancel previous runs on the same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools, rustc-dev
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run cargo fmt
+        run: cargo +nightly fmt --all -- --check
+
+      # Run clippy excluding packages that require SP1 toolchain
+      - name: Run cargo clippy
+        run: |
+          cargo clippy \
+            --workspace \
+            --all-features \
+            --lib --bins \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-perf \
+            --exclude sp1-build \
+            --exclude sp1-cli \
+            -- -D warnings -A incomplete-features
+        env:
+          CARGO_INCREMENTAL: 1
+
+  check:
+    name: Cargo Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature-flags:
+          - "--no-default-features"
+          - ""  # default features
+          - "--all-features"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ matrix.feature-flags }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # Run check excluding packages that need SP1 toolchain
+      - name: Run cargo check
+        run: |
+          cargo check \
+            --workspace \
+            --lib --bins \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-perf \
+            --exclude sp1-build \
+            --exclude sp1-cli \
+            ${{ matrix.feature-flags }}
+
+  check-verifier-no-std:
+    name: Check Verifier no_std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imac-unknown-none-elf
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check verifier no_std build
+        run: cargo check --target riscv32imac-unknown-none-elf --no-default-features -p sp1-verifier
+
+  examples-format:
+    name: Examples Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format examples
+        run: |
+          cd examples
+          cargo +nightly fmt --all -- --check
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # Run unit tests only (no integration tests) excluding packages that need SP1 toolchain
+      - name: Run unit tests
+        run: |
+          cargo test \
+            --lib \
+            --workspace \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-eval \
+            --exclude sp1-perf \
+            --exclude sp1-build \
+            --exclude sp1-cli \
+            --exclude sp1-cuda \
+            --exclude sp1-prover \
+            --exclude sp1-sdk \
+            --exclude sp1-core-machine \
+            --exclude sp1-core-executor \
+            --exclude sp1-recursion-circuit
+        env:
+          RUST_BACKTRACE: 1
+          SP1_DEV: 1

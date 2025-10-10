@@ -54,13 +54,12 @@ pub fn hash_pair(left: &[u8], right: &[u8]) -> [u8; 32] {
 
 /// Computes the root of a merkle tree given the leaves.
 ///
-/// The leaves are hashed using `compute_leaf_hash` and then the hashes are combined to form the root.
-/// The root is computed by hashing pairs of hashes until only one hash remains.
+/// The leaves are hashed using `compute_leaf_hash` and then the hashes are combined to form the
+/// root. The root is computed by hashing pairs of hashes until only one hash remains.
 pub fn compute_merkle_root(mut leaves: Vec<[u8; 32]>) -> [u8; 32] {
     if leaves.is_empty() {
         return [0u8; 32];
     }
-
 
     while leaves.len() > 1 {
         let mut next = Vec::new();
