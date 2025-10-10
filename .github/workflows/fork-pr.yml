@@ -1,22 +1,25 @@
-# Streamlined CI for SP1 fork development
-# This workflow runs on default GitHub Actions runners without custom machines
-# It excludes resource-intensive jobs and packages that require the SP1 toolchain
+# CI for SP1 fork development with SP1 toolchain
+# This workflow installs the SP1 toolchain to enable comprehensive compilation checks
+# for most packages while still running on default GitHub Actions runners
 #
-# Excluded packages:
-# - test-artifacts: Requires SP1 toolchain for build script
-# - sp1-verifier: Requires SP1 toolchain
-# - sp1-build: Requires 'succinct' toolchain
-# - sp1-cli: Depends on sp1-build
-# - sp1-cuda: Depends on test-artifacts
-# - sp1-prover: Depends on test-artifacts
-# - sp1-sdk: Depends on test-artifacts
-# - sp1-core-machine: Depends on test-artifacts
-# - sp1-core-executor: Depends on test-artifacts
-# - sp1-recursion-circuit: Depends on test-artifacts
+# Provides good compilation coverage (76-82%) while keeping test execution time
+# reasonable by excluding packages with intensive proof generation tests
+#
+# Package Exclusions:
 # - sp1-eval: Performance evaluation tools
 # - sp1-perf: Performance benchmarks
+# - sp1-cuda: GPU-dependent code
+# - test-artifacts: Requires pre-built ELF files, excluded from clippy/fmt
 #
-# This ensures quick CI feedback for code quality without needing specialized infrastructure
+# Unit Test Exclusions (additional):
+# - sp1-verifier: Verification tests require proof artifacts
+# - sp1-prover, sp1-sdk, sp1-core-machine, sp1-core-executor, sp1-recursion-circuit:
+#   Even unit tests generate proofs/execute VM (too resource-intensive for default runners)
+#
+# Coverage:
+# - Cargo check: 14/17 packages (82%)
+# - Clippy: 13/17 packages (76%)
+# - Unit tests: 8/17 packages (47% - focuses on fast utility/library tests)
 
 name: Fork PR CI
 
@@ -30,13 +33,12 @@ on:
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/**"
-  push:
-    branches:
-      - thep2p/ci  # Add push trigger for testing
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Version of SP1 toolchain to install
+  SP1_TOOLCHAIN_VERSION: succinct-1.88.0
 
 # Cancel previous runs on the same PR/branch
 concurrency:
@@ -47,6 +49,7 @@ jobs:
   lint:
     name: Format & Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -69,10 +72,40 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Install SP1 toolchain
+        run: |
+          # Download and install the SP1 "succinct" toolchain
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          echo "Installing SP1 toolchain for target: $TARGET"
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+
+          # Download the toolchain
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+
+          # Extract to a temporary directory
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+
+          # Move to the toolchains directory
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+
+          # Link the toolchain to rustup
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+
+          # Verify installation
+          rustup run succinct rustc --version || echo "Warning: Could not verify succinct toolchain"
+
+          # Clean up
+          rm -f toolchain.tar.gz
+
       - name: Run cargo fmt
         run: cargo +nightly fmt --all -- --check
 
-      # Run clippy excluding packages that require SP1 toolchain
       - name: Run cargo clippy
         run: |
           cargo clippy \
@@ -80,10 +113,9 @@ jobs:
             --all-features \
             --lib --bins \
             --exclude test-artifacts \
-            --exclude sp1-verifier \
+            --exclude sp1-cuda \
+            --exclude sp1-eval \
             --exclude sp1-perf \
-            --exclude sp1-build \
-            --exclude sp1-cli \
             -- -D warnings -A incomplete-features
         env:
           CARGO_INCREMENTAL: 1
@@ -91,6 +123,7 @@ jobs:
   check:
     name: Cargo Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         feature-flags:
@@ -116,22 +149,36 @@ jobs:
         with:
           go-version: "1.22"
 
-      # Run check excluding packages that need SP1 toolchain
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
       - name: Run cargo check
         run: |
           cargo check \
             --workspace \
             --lib --bins \
-            --exclude test-artifacts \
-            --exclude sp1-verifier \
+            --exclude sp1-cuda \
+            --exclude sp1-eval \
             --exclude sp1-perf \
-            --exclude sp1-build \
-            --exclude sp1-cli \
             ${{ matrix.feature-flags }}
 
   check-verifier-no-std:
     name: Check Verifier no_std
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -150,6 +197,7 @@ jobs:
   examples-format:
     name: Examples Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -170,6 +218,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -187,7 +236,26 @@ jobs:
         with:
           go-version: "1.22"
 
-      # Run unit tests only (no integration tests) excluding packages that need SP1 toolchain
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      # Run unit tests excluding packages with resource-intensive tests
+      # Note: Even with --lib, packages like sp1-prover, sp1-sdk, sp1-core-machine,
+      # sp1-core-executor, sp1-recursion-circuit, and sp1-verifier have unit tests
+      # that generate proofs and execute the VM, which are too intensive for default GitHub runners
       - name: Run unit tests
         run: |
           cargo test \
@@ -195,11 +263,9 @@ jobs:
             --workspace \
             --exclude test-artifacts \
             --exclude sp1-verifier \
+            --exclude sp1-cuda \
             --exclude sp1-eval \
             --exclude sp1-perf \
-            --exclude sp1-build \
-            --exclude sp1-cli \
-            --exclude sp1-cuda \
             --exclude sp1-prover \
             --exclude sp1-sdk \
             --exclude sp1-core-machine \
@@ -208,3 +274,46 @@ jobs:
         env:
           RUST_BACKTRACE: 1
           SP1_DEV: 1
+
+  # Build test to ensure test-artifacts can be built with the toolchain
+  build-test-artifacts:
+    name: Build Test Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      - name: Build test-artifacts
+        run: |
+          cd crates/test-artifacts
+          cargo build --lib
