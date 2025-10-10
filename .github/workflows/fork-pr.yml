@@ -10,6 +10,9 @@ on:
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/**"
+  push:
+    branches:
+      - thep2p/ci  # Add push trigger for testing
 
 env:
   CARGO_TERM_COLOR: always
@@ -48,8 +51,17 @@ jobs:
       - name: Run cargo fmt
         run: cargo +nightly fmt --all -- --check
 
+      # Run clippy excluding test-artifacts, verifier, and perf packages that require SP1 toolchain
       - name: Run cargo clippy
-        run: cargo clippy --workspace --all-features --lib --bins --exclude test-artifacts --exclude sp1-perf -- -D warnings -A incomplete-features
+        run: |
+          cargo clippy \
+            --workspace \
+            --all-features \
+            --lib --bins \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-perf \
+            -- -D warnings -A incomplete-features
         env:
           CARGO_INCREMENTAL: 1
 
@@ -59,9 +71,9 @@ jobs:
     strategy:
       matrix:
         feature-flags:
-          - "--workspace --lib --bins --no-default-features"
-          - "--workspace --lib --bins"
-          - "--workspace --lib --bins --all-features"
+          - "--no-default-features"
+          - ""  # default features
+          - "--all-features"
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -74,15 +86,23 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.feature-flags }}
+          key: check-${{ matrix.feature-flags }}
 
       - name: Install Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
 
+      # Run check excluding packages that need SP1 toolchain
       - name: Run cargo check
-        run: cargo check ${{ matrix.feature-flags }} --exclude test-artifacts --exclude sp1-perf
+        run: |
+          cargo check \
+            --workspace \
+            --lib --bins \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-perf \
+            ${{ matrix.feature-flags }}
 
   check-verifier-no-std:
     name: Check Verifier no_std
@@ -101,10 +121,6 @@ jobs:
 
       - name: Check verifier no_std build
         run: cargo check --target riscv32imac-unknown-none-elf --no-default-features -p sp1-verifier
-
-  # Note: test-artifacts and examples require the SP1 toolchain to be installed
-  # which is too resource-intensive for quick fork CI checks.
-  # These are thoroughly tested in the upstream CI.
 
   examples-format:
     name: Examples Format Check
@@ -126,27 +142,36 @@ jobs:
           cd examples
           cargo +nightly fmt --all -- --check
 
-  # Optional: Light unit tests (excluding resource-intensive integration tests)
-  # Uncomment if you want some test coverage, but be aware this may take longer
-  # unit-tests:
-  #   name: Unit Tests
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout sources
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Install Rust toolchain
-  #       uses: dtolnay/rust-toolchain@stable
-  #
-  #     - name: Setup Rust cache
-  #       uses: Swatinem/rust-cache@v2
-  #
-  #     - name: Install Go
-  #       uses: actions/setup-go@v5
-  #       with:
-  #         go-version: "1.22"
-  #
-  #     - name: Run unit tests (lib tests only, no integration tests)
-  #       run: cargo test --lib --workspace --exclude sp1-verifier
-  #       env:
-  #         RUST_BACKTRACE: 1
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      # Run unit tests only (no integration tests) excluding packages that need SP1 toolchain
+      - name: Run unit tests
+        run: |
+          cargo test \
+            --lib \
+            --workspace \
+            --exclude test-artifacts \
+            --exclude sp1-verifier \
+            --exclude sp1-eval \
+            --exclude sp1-perf
+        env:
+          RUST_BACKTRACE: 1
+          SP1_DEV: 1
