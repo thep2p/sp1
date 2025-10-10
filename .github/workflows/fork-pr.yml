@@ -1,3 +1,20 @@
+# Streamlined CI for SP1 fork development
+# This workflow runs on default GitHub Actions runners without custom machines
+# It excludes resource-intensive jobs and packages that require the SP1 toolchain
+#
+# Excluded packages:
+# - test-artifacts: Requires SP1 toolchain for build script
+# - sp1-verifier: Requires SP1 toolchain
+# - sp1-build: Requires 'succinct' toolchain
+# - sp1-cli: Depends on sp1-build
+# - sp1-cuda: Depends on test-artifacts
+# - sp1-prover: Depends on test-artifacts
+# - sp1-sdk: Depends on test-artifacts
+# - sp1-eval: Performance evaluation tools
+# - sp1-perf: Performance benchmarks
+#
+# This ensures quick CI feedback for code quality without needing specialized infrastructure
+
 name: Fork PR CI
 
 on:
@@ -18,6 +35,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Cancel previous runs on the same PR/branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -177,7 +195,10 @@ jobs:
             --exclude sp1-eval \
             --exclude sp1-perf \
             --exclude sp1-build \
-            --exclude sp1-cli
+            --exclude sp1-cli \
+            --exclude sp1-cuda \
+            --exclude sp1-prover \
+            --exclude sp1-sdk
         env:
           RUST_BACKTRACE: 1
           SP1_DEV: 1
