@@ -5,18 +5,21 @@
 # This provides MUCH better compilation coverage than the minimal CI (fork-pr.yml)
 # while keeping test execution time reasonable by excluding packages with intensive tests
 #
-# Compilation checks (cargo check, clippy): 14/17 packages (82% coverage)
-# Unit tests: Limited to packages with fast tests only
-#
-# Excluded from compilation:
+# Package Exclusions:
 # - sp1-eval: Performance evaluation tools
 # - sp1-perf: Performance benchmarks
 # - sp1-cuda: GPU-dependent code
+# - test-artifacts: Requires pre-built ELF files, excluded from clippy/fmt
 #
-# Excluded from unit tests (in addition to above):
-# - test-artifacts: Not a testable package
+# Unit Test Exclusions (additional):
+# - sp1-verifier: Verification tests require proof artifacts
 # - sp1-prover, sp1-sdk, sp1-core-machine, sp1-core-executor, sp1-recursion-circuit:
-#   Even unit tests in these packages generate proofs/execute VM (too resource-intensive)
+#   Even unit tests generate proofs/execute VM (too resource-intensive for default runners)
+#
+# Coverage:
+# - Cargo check: 14/17 packages (82%)
+# - Clippy: 13/17 packages (76%)
+# - Unit tests: 8/17 packages (47% - focuses on fast utility/library tests)
 
 name: Fork PR CI (Full)
 
@@ -112,6 +115,7 @@ jobs:
             --workspace \
             --all-features \
             --lib --bins \
+            --exclude test-artifacts \
             --exclude sp1-cuda \
             --exclude sp1-eval \
             --exclude sp1-perf \
@@ -253,14 +257,15 @@ jobs:
 
       # Run unit tests excluding packages with resource-intensive tests
       # Note: Even with --lib, packages like sp1-prover, sp1-sdk, sp1-core-machine,
-      # sp1-core-executor, and sp1-recursion-circuit have unit tests that generate
-      # proofs and execute the VM, which are too intensive for default GitHub runners
+      # sp1-core-executor, sp1-recursion-circuit, and sp1-verifier have unit tests
+      # that generate proofs and execute the VM, which are too intensive for default GitHub runners
       - name: Run unit tests
         run: |
           cargo test \
             --lib \
             --workspace \
             --exclude test-artifacts \
+            --exclude sp1-verifier \
             --exclude sp1-cuda \
             --exclude sp1-eval \
             --exclude sp1-perf \
