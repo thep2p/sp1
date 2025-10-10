@@ -12,6 +12,7 @@
 # - sp1-sdk: Depends on test-artifacts
 # - sp1-core-machine: Depends on test-artifacts
 # - sp1-core-executor: Depends on test-artifacts
+# - sp1-recursion-circuit: Depends on test-artifacts
 # - sp1-eval: Performance evaluation tools
 # - sp1-perf: Performance benchmarks
 #
@@ -202,7 +203,8 @@ jobs:
             --exclude sp1-prover \
             --exclude sp1-sdk \
             --exclude sp1-core-machine \
-            --exclude sp1-core-executor
+            --exclude sp1-core-executor \
+            --exclude sp1-recursion-circuit
         env:
           RUST_BACKTRACE: 1
           SP1_DEV: 1
