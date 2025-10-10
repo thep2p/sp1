@@ -1,11 +1,22 @@
 # Full CI for SP1 fork development with SP1 toolchain
-# This workflow installs the minimal SP1 toolchain to enable testing more packages
-# while still running on default GitHub Actions runners
+# This workflow installs the SP1 toolchain to enable comprehensive compilation checks
+# for most packages while still running on default GitHub Actions runners
 #
-# Only the most resource-intensive packages are excluded:
+# This provides MUCH better compilation coverage than the minimal CI (fork-pr.yml)
+# while keeping test execution time reasonable by excluding packages with intensive tests
+#
+# Compilation checks (cargo check, clippy): 14/17 packages (82% coverage)
+# Unit tests: Limited to packages with fast tests only
+#
+# Excluded from compilation:
 # - sp1-eval: Performance evaluation tools
 # - sp1-perf: Performance benchmarks
 # - sp1-cuda: GPU-dependent code
+#
+# Excluded from unit tests (in addition to above):
+# - test-artifacts: Not a testable package
+# - sp1-prover, sp1-sdk, sp1-core-machine, sp1-core-executor, sp1-recursion-circuit:
+#   Even unit tests in these packages generate proofs/execute VM (too resource-intensive)
 
 name: Fork PR CI (Full)
 
@@ -38,6 +49,7 @@ jobs:
   lint:
     name: Format & Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -110,6 +122,7 @@ jobs:
   check:
     name: Cargo Check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         feature-flags:
@@ -164,6 +177,7 @@ jobs:
   check-verifier-no-std:
     name: Check Verifier no_std
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -182,6 +196,7 @@ jobs:
   examples-format:
     name: Examples Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -202,6 +217,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -235,15 +251,24 @@ jobs:
           rustup toolchain link succinct $TOOLCHAIN_DIR
           rm -f toolchain.tar.gz
 
-      # Run unit tests excluding only the most resource-intensive packages
+      # Run unit tests excluding packages with resource-intensive tests
+      # Note: Even with --lib, packages like sp1-prover, sp1-sdk, sp1-core-machine,
+      # sp1-core-executor, and sp1-recursion-circuit have unit tests that generate
+      # proofs and execute the VM, which are too intensive for default GitHub runners
       - name: Run unit tests
         run: |
           cargo test \
             --lib \
             --workspace \
+            --exclude test-artifacts \
             --exclude sp1-cuda \
             --exclude sp1-eval \
-            --exclude sp1-perf
+            --exclude sp1-perf \
+            --exclude sp1-prover \
+            --exclude sp1-sdk \
+            --exclude sp1-core-machine \
+            --exclude sp1-core-executor \
+            --exclude sp1-recursion-circuit
         env:
           RUST_BACKTRACE: 1
           SP1_DEV: 1
@@ -252,6 +277,7 @@ jobs:
   build-test-artifacts:
     name: Build Test Artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
