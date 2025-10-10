@@ -51,7 +51,7 @@ jobs:
       - name: Run cargo fmt
         run: cargo +nightly fmt --all -- --check
 
-      # Run clippy excluding test-artifacts, verifier, and perf packages that require SP1 toolchain
+      # Run clippy excluding packages that require SP1 toolchain
       - name: Run cargo clippy
         run: |
           cargo clippy \
@@ -61,6 +61,7 @@ jobs:
             --exclude test-artifacts \
             --exclude sp1-verifier \
             --exclude sp1-perf \
+            --exclude sp1-build \
             -- -D warnings -A incomplete-features
         env:
           CARGO_INCREMENTAL: 1
@@ -102,6 +103,7 @@ jobs:
             --exclude test-artifacts \
             --exclude sp1-verifier \
             --exclude sp1-perf \
+            --exclude sp1-build \
             ${{ matrix.feature-flags }}
 
   check-verifier-no-std:
@@ -171,7 +173,8 @@ jobs:
             --exclude test-artifacts \
             --exclude sp1-verifier \
             --exclude sp1-eval \
-            --exclude sp1-perf
+            --exclude sp1-perf \
+            --exclude sp1-build
         env:
           RUST_BACKTRACE: 1
           SP1_DEV: 1
