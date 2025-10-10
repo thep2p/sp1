@@ -1,0 +1,291 @@
+# Full CI for SP1 fork development with SP1 toolchain
+# This workflow installs the minimal SP1 toolchain to enable testing more packages
+# while still running on default GitHub Actions runners
+#
+# Only the most resource-intensive packages are excluded:
+# - sp1-eval: Performance evaluation tools
+# - sp1-perf: Performance benchmarks
+# - sp1-cuda: GPU-dependent code
+
+name: Fork PR CI (Full)
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - thep2p-dev
+    paths:
+      - "crates/**"
+      - "examples/**"
+      - "Cargo.toml"
+      - ".github/workflows/**"
+  push:
+    branches:
+      - thep2p/ci-full  # Test branch for full CI
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Version of SP1 toolchain to install
+  SP1_TOOLCHAIN_VERSION: succinct-1.88.0
+
+# Cancel previous runs on the same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format & Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy, llvm-tools, rustc-dev
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          # Download and install the SP1 "succinct" toolchain
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          echo "Installing SP1 toolchain for target: $TARGET"
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+
+          # Download the toolchain
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+
+          # Extract to a temporary directory
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+
+          # Move to the toolchains directory
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+
+          # Link the toolchain to rustup
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+
+          # Verify installation
+          rustup run succinct rustc --version || echo "Warning: Could not verify succinct toolchain"
+
+          # Clean up
+          rm -f toolchain.tar.gz
+
+      - name: Run cargo fmt
+        run: cargo +nightly fmt --all -- --check
+
+      - name: Run cargo clippy
+        run: |
+          cargo clippy \
+            --workspace \
+            --all-features \
+            --lib --bins \
+            --exclude sp1-cuda \
+            --exclude sp1-eval \
+            --exclude sp1-perf \
+            -- -D warnings -A incomplete-features
+        env:
+          CARGO_INCREMENTAL: 1
+
+  check:
+    name: Cargo Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        feature-flags:
+          - "--no-default-features"
+          - ""  # default features
+          - "--all-features"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ matrix.feature-flags }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      - name: Run cargo check
+        run: |
+          cargo check \
+            --workspace \
+            --lib --bins \
+            --exclude sp1-cuda \
+            --exclude sp1-eval \
+            --exclude sp1-perf \
+            ${{ matrix.feature-flags }}
+
+  check-verifier-no-std:
+    name: Check Verifier no_std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv32imac-unknown-none-elf
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check verifier no_std build
+        run: cargo check --target riscv32imac-unknown-none-elf --no-default-features -p sp1-verifier
+
+  examples-format:
+    name: Examples Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install nightly for formatting
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format examples
+        run: |
+          cd examples
+          cargo +nightly fmt --all -- --check
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      # Run unit tests excluding only the most resource-intensive packages
+      - name: Run unit tests
+        run: |
+          cargo test \
+            --lib \
+            --workspace \
+            --exclude sp1-cuda \
+            --exclude sp1-eval \
+            --exclude sp1-perf
+        env:
+          RUST_BACKTRACE: 1
+          SP1_DEV: 1
+
+  # Build test to ensure test-artifacts can be built with the toolchain
+  build-test-artifacts:
+    name: Build Test Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      - name: Build test-artifacts
+        run: |
+          cd crates/test-artifacts
+          cargo build --lib
