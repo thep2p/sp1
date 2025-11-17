@@ -31,6 +31,7 @@ on:
     paths:
       - "crates/**"
       - "examples/**"
+      - "patch-testing/**"
       - "Cargo.toml"
       - ".github/workflows/**"
 
@@ -317,3 +318,53 @@ jobs:
         run: |
           cd crates/test-artifacts
           cargo build --lib
+
+  # Check patch-testing programs can build with SP1 toolchain
+  check-patch-testing:
+    name: Check Patch Testing Programs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools, rustc-dev
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "patch-testing -> target"
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install SP1 toolchain
+        run: |
+          TARGET=$(rustc -vV | sed -n 's|host: ||p')
+          TOOLCHAIN_URL="https://github.com/succinctlabs/rust/releases/download/${{ env.SP1_TOOLCHAIN_VERSION }}/rust-toolchain-${TARGET}.tar.gz"
+
+          mkdir -p ~/.sp1/toolchains
+          cd ~/.sp1
+          curl -L -o toolchain.tar.gz $TOOLCHAIN_URL
+          mkdir -p toolchain-temp
+          tar -xzf toolchain.tar.gz -C toolchain-temp
+          TOOLCHAIN_DIR=~/.sp1/toolchains/succinct
+          rm -rf $TOOLCHAIN_DIR
+          mv toolchain-temp $TOOLCHAIN_DIR
+          rustup toolchain link succinct $TOOLCHAIN_DIR
+          rm -f toolchain.tar.gz
+
+      - name: Check patch-testing workspace
+        run: |
+          cd patch-testing
+          cargo check --workspace --all-targets
+
+      - name: Build BLS12-381 program binaries
+        run: |
+          cd patch-testing/bls12-381/program
+          cargo build --bins
